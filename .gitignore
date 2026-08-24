@@ -1,15 +1,27 @@
-# Secure Credentials
+# Secure Key Environment Configurations
 .env
 .env.local
+.env.*
 
-# Python Environments & Artifacts
+# Python Architecture Cache Files
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
+.pytest_cache/
+
+# IDE Workspace Settings
+.vscode/
+.idea/
+
+# Streamlit Local Configurations
+.streamlit/config.toml
+.streamlit/secrets.toml
+
+# Persistent Local Baseline Snapshots
+previous_day_baseline.json
+
+# Local Virtual Environments
 venv/
 .venv/
 env/
-
-# App State Backends
-previous_day_baseline.json
-.streamlit/config.toml
