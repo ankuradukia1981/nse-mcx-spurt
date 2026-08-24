@@ -165,7 +165,7 @@ if target_viz_symbol in st.session_state.history:
             markers=True,
             line_shape="linear"
         )
-        fig.update_traces(line_color="#FF4B4B", lw=2.5)
+        fig.update_traces(line=dict(color="#FF4B4B", width=2.5))
         st.plotly_chart(fig, use_container_width=True)
 
 # --- Automatic Refresh Driver Module Execution Hook ---
