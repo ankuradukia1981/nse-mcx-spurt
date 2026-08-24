@@ -20,7 +20,7 @@ st.markdown("""
         div[data-testid="stMetricDelta"] { font-size: 0.9rem !important; }
         .stTabs [data-baseweb="tab"] { font-size: 14px !important; padding: 8px 12px !important; }
     </style>
-""", unsafe_allow_allowed=True)
+""", unsafe_allow_html=True)
 
 # Cache System Registries
 if "watchlist" not in st.session_state:
