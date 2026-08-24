@@ -18,15 +18,15 @@ if not DHAN_CLIENT_ID or not DHAN_ACCESS_TOKEN:
 TRACKED_INSTRUMENTS = {
     "NIFTY": {
         "symbol": "NIFTY",
-        "segment": "IDX_I",          # NSE Index
-        "security_id": "13",          # Dhan Security Master Constant for NIFTY Index
+        "segment": "IDX_I",          # NSE Index Segment
+        "security_id": "13",          # Dhan Master Constant for NIFTY 50 Index
         "strike_step": 50,
         "expiry": "2026-08-27"        # Target active execution contract
     },
     "BANKNIFTY": {
         "symbol": "BANKNIFTY",
-        "segment": "IDX_I",          # NSE Index
-        "security_id": "25",          # Dhan Security Master Constant for BANKNIFTY
+        "segment": "IDX_I",          # NSE Index Segment
+        "security_id": "25",          # Dhan Master Constant for BANKNIFTY
         "strike_step": 100,
         "expiry": "2026-08-27"
     },
