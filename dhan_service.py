@@ -57,10 +57,9 @@ class DhanDataService:
             
             if spot_res.status_code == 200:
                 spot_data = spot_res.json()
-                # Parse standard Dhan dict response array format safely
                 live_spot = float(spot_data.get("data", [{}])[0].get("lastPrice", 0.0))
 
-            # Step B: Get Option Chain Instruments DataFrame via Data API 
+            # Step B: Get Option Chain Instruments
             chain_url = f"{self.base_url}/v2/optionchain"
             chain_payload = {
                 "underlyingSymbol": symbol,
@@ -108,11 +107,11 @@ class DhanDataService:
 
     def _generate_simulated_fallback(self, symbol, strike_step, expiry, target_strike):
         base_spots = {"NIFTY": 24250.00, "BANKNIFTY": 52100.00, "CRUDEOIL": 6320.00}
-        sim_spot = round(base_spots.get(symbol, float(target_strike)) + random.uniform(-10.0, 10.0), 2)
+        sim_spot = round(base_spots.get(symbol, float(target_strike)) + random.uniform(-15.0, 15.0), 2)
         return {
             "spot": sim_spot,
             "strike": target_strike,
-            "ce_ltp": round(random.uniform(110.0, 180.0), 2),
-            "pe_ltp": round(random.uniform(110.0, 180.0), 2),
+            "ce_ltp": round(random.uniform(120.0, 160.0), 2),
+            "pe_ltp": round(random.uniform(120.0, 160.0), 2),
             "expiry": expiry
         }
