@@ -1,173 +1,118 @@
-import streamlit as st
-import pandas as pd
-import datetime
 import time
-import os
-import json
-import plotly.express as px
+import requests
+import random
+from config import DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN, RATE_LIMIT_BUFFER, CACHE_EXPIRY_SECONDS
 
-# Import custom architecture components
-import config
-from dhan_service import DhanDataService
-
-# --- Initialize Session State Repositories ---
-if "watchlist" not in st.session_state:
-    st.session_state.watchlist = set()  # Day-locked symbols register (§4)
-if "history" not in st.session_state:
-    st.session_state.history = {}       # Combined premium historical log tracker
-
-# --- Core Service Instance Hook ---
-if "dhan_service" not in st.session_state:
-    st.session_state.dhan_service = DhanDataService()
-
-# --- Baseline Management Engine (§3.3) ---
-def get_frozen_baselines():
-    if os.path.exists(config.BASELINE_FILE):
-        with open(config.BASELINE_FILE, "r") as f:
-            return json.load(f)
-    
-    # Static fallback seeds matching the requested specification format
-    fallback_seeds = {
-        "NIFTY": {"date": "2026-08-21", "spot": 24310.20, "expiry": "2026-08-27", "strike": 24300, "combined_premium": 307.50},
-        "BANKNIFTY": {"date": "2026-08-21", "spot": 52080.50, "expiry": "2026-08-27", "strike": 52100, "combined_premium": 806.00},
-        "CRUDEOIL": {"date": "2026-08-21", "spot": 6345.00, "expiry": "2026-09-18", "strike": 6350, "combined_premium": 375.00}
-    }
-    with open(config.BASELINE_FILE, "w") as f:
-        json.dump(fallback_seeds, f, indent=4)
-    return fallback_seeds
-
-frozen_baselines = get_frozen_baselines()
-
-# --- Interactive Sidebar Workspace ---
-st.sidebar.title("🔐 Secure Terminal Control")
-st.sidebar.text_input("Dhan Connected ID", value=config.DHAN_CLIENT_ID or "NOT DETECTED", disabled=True)
-
-# Configuration parameters configured in UI panel
-st.sidebar.markdown("---")
-st.sidebar.title("⚙️ Rule Configuration Panel")
-threshold = st.sidebar.slider("Spurt Threshold (%)", min_value=0.5, max_value=50.0, value=10.0, step=0.5)
-poll_interval = st.sidebar.number_input("Refresh Window Loop (Seconds)", min_value=3, max_value=60, value=10)
-
-# --- Main Interface Dashboard Frame ---
-st.title("📊 ATM Combined Premium Spike Monitor (v6)")
-st.caption(f"Engine Mode: {config.TERMINAL_ENV} | Connection Status: {'LIVE' if st.session_state.dhan_service.is_live else 'SIM WORKSPACE FALLBACK'}")
-
-current_time = datetime.datetime.now().strftime("%H:%M:%S")
-grid_data = []
-
-# --- Real-Time Execution Framework Loop ---
-for sym_key, inst_meta in config.TRACKED_INSTRUMENTS.items():
-    base = frozen_baselines.get(sym_key)
-    if not base:
-        continue
-    
-    # Enforces §3 Strike Selection Rule: Lock to previous-day target strike
-    target_strike = base["strike"]
-    
-    # Query Data Service Network Pipeline (Includes caching and rate throttling)
-    live_feed, feed_source = st.session_state.dhan_service.get_live_option_chain_snapshot(
-        symbol=inst_meta["symbol"],
-        segment=inst_meta["segment"],
-        security_id=inst_meta["security_id"],
-        strike_step=inst_meta["strike_step"],
-        expiry=inst_meta["expiry"],
-        target_strike=target_strike
-    )
-    
-    # Extract structural pricing dimensions
-    live_spot = live_feed["spot"]
-    ce_ltp = live_feed["ce_ltp"]
-    pe_ltp = live_feed["pe_ltp"]
-    combined_today = round(ce_ltp + pe_ltp, 2)
-    
-    # Compute Spurt% against fixed previous-day baseline (§3.4)
-    base_premium = base["combined_premium"]
-    spurt_pct = round(((combined_today - base_premium) / base_premium) * 100, 2)
-    
-    # Enforce Day-Locked Watchlist Threshold Validation Check (§4)
-    if abs(spurt_pct) >= threshold:
-        st.session_state.watchlist.add(sym_key)
+class DhanDataService:
+    def __init__(self):
+        self.client_id = DHAN_CLIENT_ID
+        self.access_token = DHAN_ACCESS_TOKEN
+        self.is_live = False
+        self.last_api_call_time = 0.0
+        self.chain_cache = {}
+        self.base_url = "https://dhan.co"  # Production API Root Gateway
         
-    status = "SPIKE" if sym_key in st.session_state.watchlist else "NORMAL"
-    
-    # Append values to history log for chart updates
-    if sym_key not in st.session_state.history:
-        st.session_state.history[sym_key] = []
-    st.session_state.history[sym_key].append({"Time": current_time, "Combined Premium": combined_today})
-    
-    # Retain time window size constraint parameters
-    if len(st.session_state.history[sym_key]) > 60:
-        st.session_state.history[sym_key].pop(0)
-        
-    grid_data.append({
-        "Symbol": sym_key,
-        "Live Spot (₹)": live_spot,
-        "Expiry": live_feed["expiry"],
-        "Strike": target_strike,
-        "CE": ce_ltp,
-        "PE": pe_ltp,
-        "Combined Premium (₹)": combined_today,
-        "% Chg (vs Base)": spurt_pct,
-        "Status": status,
-        "Feed Source": feed_source
-    })
+        # Validate that real production credentials exist
+        if self.client_id and self.access_token and "MOCK" not in self.client_id:
+            self.is_live = True
+            self.headers = {
+                "access-token": self.access_token,
+                "client-id": self.client_id,
+                "Content-Type": "application/json"
+            }
 
-df_report_cards = pd.DataFrame(grid_data)
+    def _throttle_call(self):
+        """Enforces §8 global request throttling: ≤ 1 unique request per 3 seconds"""
+        now = time.time()
+        elapsed = now - self.last_api_call_time
+        if elapsed < RATE_LIMIT_BUFFER:
+            time.sleep(RATE_LIMIT_BUFFER - elapsed)
+        self.last_api_call_time = time.time()
 
-# --- UI Render Segment: Section 5 Watchlist Layout ---
-st.subheader("📋 Active Day-Locked Watchlist")
-df_active_watchlist = df_report_cards[df_report_cards["Symbol"].isin(st.session_state.watchlist)]
+    def get_live_option_chain_snapshot(self, symbol, segment, security_id, strike_step, expiry, target_strike):
+        """
+        Fetches option chains from Dhan using the production market feed API.
+        Defensively matches specific strike structures.
+        """
+        cache_key = f"{symbol}_{expiry}_{target_strike}"
+        now = time.time()
 
-if not df_active_watchlist.empty:
-    st.dataframe(
-        df_active_watchlist[["Symbol", "Expiry", "Strike", "CE", "PE", "Combined Premium (₹)", "% Chg (vs Base)", "Status", "Feed Source"]],
-        use_container_width=True,
-        hide_index=True
-    )
-else:
-    st.info("No tracked items have crossed the threshold limit during this session.")
+        if cache_key in self.chain_cache:
+            cache_entry = self.chain_cache[cache_key]
+            if now - cache_entry["timestamp"] < CACHE_EXPIRY_SECONDS:
+                return cache_entry["data"], "LIVE_CACHE"
 
-# --- UI Render Segment: System-Wide Overview Grid ---
-st.subheader("🔍 Real-Time Instrument Feed Metrics")
-for index, row in df_report_cards.iterrows():
-    with st.container(border=True):
-        c1, c2, c3, c4, c5 = st.columns(5)
-        with c1:
-            st.markdown(f"### **{row['Symbol']}**")
-            st.caption(f"Live Spot: **₹{row['Live Spot (₹)']}**")
-        with c2:
-            st.metric("Combined Option Value", f"₹{row['Combined Premium (₹)']}", f"{row['% Chg (vs Base)']}%")
-        with c3:
-            st.markdown(f"Expiry: `{row['Expiry']}`")
-            st.markdown(f"Strike: **{row['Strike']}**")
-        with c4:
-            st.text(f"Call LTP: ₹{row['CE']}")
-            st.text(f"Put LTP: ₹{row['PE']}")
-        with c5:
-            if row["Status"] == "SPIKE":
-                st.error("🚨 Day Lock Active: SPIKE")
+        if not self.is_live:
+            return self._generate_simulated_fallback(symbol, strike_step, expiry, target_strike), "SIM"
+
+        try:
+            self._throttle_call()
+            
+            # Step A: Get Live Underlying Spot Price First
+            spot_url = f"{self.base_url}/v2/marketfeed/ltp"
+            spot_payload = {"instruments": [{"exchangeSegment": segment, "securityId": security_id}]}
+            
+            spot_res = requests.post(spot_url, json=spot_payload, headers=self.headers, timeout=5)
+            live_spot = 0.0
+            
+            if spot_res.status_code == 200:
+                spot_data = spot_res.json()
+                # Parse standard Dhan dict response array format safely
+                live_spot = float(spot_data.get("data", [{}])[0].get("lastPrice", 0.0))
+
+            # Step B: Get Option Chain Instruments DataFrame via Data API 
+            chain_url = f"{self.base_url}/v2/optionchain"
+            chain_payload = {
+                "underlyingSymbol": symbol,
+                "exchangeSegment": segment,
+                "expiryDate": expiry
+            }
+            
+            response = requests.post(chain_url, json=chain_payload, headers=self.headers, timeout=6)
+            
+            if response.status_code == 200:
+                chain_data = response.json().get("data", {})
+                option_chain_entries = chain_data.get("optionChain", [])
+                
+                ce_ltp, pe_ltp = 0.0, 0.0
+                
+                # Filter precisely by the required target strike (§3.1)
+                for item in option_chain_entries:
+                    if int(float(item.get("strikePrice", 0))) == int(target_strike):
+                        if item.get("optionType") == "CE":
+                            ce_ltp = float(item.get("lastPrice", 0.0)) or float(item.get("bidPrice", 0.0))
+                        elif item.get("optionType") == "PE":
+                            pe_ltp = float(item.get("lastPrice", 0.0)) or float(item.get("bidPrice", 0.0))
+                
+                # Failsafe default protection if option legs have 0 volume/LTP initially
+                if ce_ltp == 0.0 and pe_ltp == 0.0:
+                    return self._generate_simulated_fallback(symbol, strike_step, expiry, target_strike), "LIVE_EMPTY_FALLBACK"
+
+                result_data = {
+                    "spot": live_spot if live_spot > 0 else float(target_strike),
+                    "strike": target_strike,
+                    "ce_ltp": round(ce_ltp, 2),
+                    "pe_ltp": round(pe_ltp, 2),
+                    "expiry": expiry
+                }
+                
+                self.chain_cache[cache_key] = {"timestamp": time.time(), "data": result_data}
+                return result_data, "LIVE"
+                
             else:
-                st.success(f"🟢 Track ({row['Feed Source']})")
+                return self._generate_simulated_fallback(symbol, strike_step, expiry, target_strike), f"HTTP_{response.status_code}"
 
-# --- UI Render Segment: Section 6 Chart Presentation ---
-st.markdown("---")
-st.subheader("📈 Combined Premium Session Charts Only")
-target_viz_symbol = st.selectbox("Select Target Underlying Engine", list(config.TRACKED_INSTRUMENTS.keys()))
+        except Exception as api_err:
+            print(f"[LIVE CRITICAL CRASH] {symbol} fetch aborted: {api_err}")
+            return self._generate_simulated_fallback(symbol, strike_step, expiry, target_strike), "ERROR"
 
-if target_viz_symbol in st.session_state.history:
-    session_chart_data = pd.DataFrame(st.session_state.history[target_viz_symbol])
-    if not session_chart_data.empty:
-        fig = px.line(
-            session_chart_data,
-            x="Time",
-            y="Combined Premium",
-            title=f"Premium Profile: {target_viz_symbol} (Strike: {frozen_baselines[target_viz_symbol]['strike']})",
-            markers=True,
-            line_shape="linear"
-        )
-        fig.update_traces(line_color="#FF4B4B", lw=2.5)
-        st.plotly_chart(fig, use_container_width=True)
-
-# --- Automatic Refresh Driver Module Execution Hook ---
-time.sleep(poll_interval)
-st.rerun()
+    def _generate_simulated_fallback(self, symbol, strike_step, expiry, target_strike):
+        base_spots = {"NIFTY": 24250.00, "BANKNIFTY": 52100.00, "CRUDEOIL": 6320.00}
+        sim_spot = round(base_spots.get(symbol, float(target_strike)) + random.uniform(-10.0, 10.0), 2)
+        return {
+            "spot": sim_spot,
+            "strike": target_strike,
+            "ce_ltp": round(random.uniform(110.0, 180.0), 2),
+            "pe_ltp": round(random.uniform(110.0, 180.0), 2),
+            "expiry": expiry
+        }
