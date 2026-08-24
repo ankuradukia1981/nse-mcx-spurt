@@ -166,7 +166,7 @@ with col_chart:
                 xaxis_title="Timeline Feed",
                 yaxis_title="Premium Index Value (₹)"
             )
-            st.plotly_chart(fig, use_container_width=True, use_container_height=False)
+            st.plotly_chart(fig, use_container_width=True)
 
 # Bottom Status Footer Banner Bar
 st.markdown("---")
