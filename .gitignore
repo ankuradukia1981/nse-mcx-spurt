@@ -1,8 +1,15 @@
+# Secure Credentials
 .env
-.streamlit/secrets.toml
+.env.local
+
+# Python Environments & Artifacts
 __pycache__/
-*.pyc
-.venv/
+*.py[cod]
+*$py.class
 venv/
-.DS_Store
-session_baselines.json
+.venv/
+env/
+
+# App State Backends
+previous_day_baseline.json
+.streamlit/config.toml
